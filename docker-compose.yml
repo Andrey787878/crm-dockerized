@@ -1,0 +1,92 @@
+version: "3.9"
+
+services:
+  database:
+    image: postgres:17.4-alpine
+    container_name: crm_database
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - backend_network
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backup:
+    image: postgres:17.4-alpine
+    depends_on:
+      - database
+    entrypoint: ["bash", "-c", "pg_dump -h database -U ${POSTGRES_USER} ${POSTGRES_DB} > /backup/backup.sql"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./backup:/backup
+    networks:
+      - backend_network
+  
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: crm_backend
+    environment:
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_HOST: database
+      DB_NAME: ${POSTGRES_DB}
+      DB_PORT: ${DB_PORT}
+      NODE_ENV: ${NODE_ENV}
+    volumes:  
+      - ./logs/backend:/app/logs
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - backend_network
+      - frontend_network
+    ports:
+      - "${BACKEND_PORT:-3001}:3001"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: crm_frontend
+    volumes:
+      - ./logs/nginx:/var/log/nginx
+      - ./certs/nginx.crt:/etc/ssl/certs/nginx.crt:ro
+      - ./certs/nginx.key:/etc/ssl/private/nginx.key:ro
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+    networks:
+      - frontend_network
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+      - "${FRONTEND_SSL_PORT:-443}:443"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  backend_network:
+    driver: bridge
+    name: crm_backend_net
+  frontend_network:
+    driver: bridge
+    name: crm_frontend_net

@@ -44,6 +44,10 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 
+# Certs
+.certs/*.key
+.certs/*.crt
+
 # Package lock files (optional, uncomment if you don't want to track them)
 # package-lock.json
 # yarn.lock
